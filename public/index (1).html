@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ระบบติดตามการต่ออายุ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0F1318; --panel: #171D25; --panel-hi: #1D2530; --line: #2A3340;
+    --text: #E7EBF0; --muted: #8B96A5; --muted2: #5C6675; --accent: #4FD1C5;
+    --overdue: #E5484D; --overdue-bg: rgba(229,72,77,0.12);
+    --soon: #F5A524; --soon-bg: rgba(245,165,36,0.12);
+    --ok: #2FB170; --ok-bg: rgba(47,177,112,0.10);
+    --unset: #6E7889; --unset-bg: rgba(110,120,137,0.10);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans Thai',sans-serif;min-height:100vh;padding:28px 20px 60px;}
+  .wrap{max-width:840px;margin:0 auto;}
+  header{margin-bottom:22px;}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.04em;color:var(--muted2);margin-bottom:6px;}
+  h1{font-size:26px;font-weight:700;margin:0 0 4px;letter-spacing:-0.01em;}
+  .subtitle{color:var(--muted);font-size:14px;line-height:1.5;max-width:60ch;}
+  .stats{display:flex;gap:10px;margin:20px 0 24px;flex-wrap:wrap;}
+  .stat{flex:1;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .stat .num{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;line-height:1;}
+  .stat .lbl{font-size:12.5px;color:var(--muted);margin-top:6px;}
+  .stat.overdue .num{color:var(--overdue);} .stat.soon .num{color:var(--soon);} .stat.ok .num{color:var(--ok);} .stat.renewed .num{color:var(--accent);}
+  .group{margin-bottom:26px;}
+  .group-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:10px;}
+  .group-title .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .row{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:8px;padding:13px 14px;margin-bottom:8px;flex-wrap:wrap;}
+  .row.overdue{border-left-color:var(--overdue);} .row.soon{border-left-color:var(--soon);} .row.ok{border-left-color:var(--ok);}
+  .row.unset{border-left-color:var(--unset);} .row.renewed{border-left-color:var(--accent);opacity:0.72;}
+  .row-main{flex:1;min-width:180px;}
+  .row-name{font-size:15px;font-weight:600;}
+  .row-note{font-size:12.5px;color:var(--muted);margin-top:3px;}
+  .row-side{display:flex;align-items:center;gap:12px;flex:none;flex-wrap:wrap;}
+  .days-label{font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:4px 9px;border-radius:20px;white-space:nowrap;}
+  .days-label.overdue{color:var(--overdue);background:var(--overdue-bg);}
+  .days-label.soon{color:var(--soon);background:var(--soon-bg);}
+  .days-label.ok{color:var(--ok);background:var(--ok-bg);}
+  .days-label.unset{color:var(--unset);background:var(--unset-bg);}
+  .days-label.renewed{color:var(--accent);background:rgba(79,209,197,0.12);}
+  input[type=date],input[type=text],input[type=password]{
+    font-family:'IBM Plex Mono',monospace;background:var(--panel-hi);border:1px solid var(--line);color:var(--text);
+    border-radius:6px;padding:6px 8px;font-size:12.5px;color-scheme:dark;
+  }
+  input[type=date]{width:132px;}
+  input:focus{outline:1px solid var(--accent);border-color:var(--accent);}
+  .renew-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none;}
+  .renew-toggle input{accent-color:var(--accent);cursor:pointer;}
+  .renew-toggle.is-renewed{color:var(--accent);}
+  footer{margin-top:30px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:var(--muted2);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;}
+  .reset-btn,.logout-btn{background:none;border:1px solid var(--line);color:var(--muted);font-family:'IBM Plex Sans Thai',sans-serif;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;}
+  .reset-btn:hover{border-color:var(--muted);color:var(--text);}
+  .logout-btn:hover{border-color:var(--overdue);color:var(--overdue);}
+  .add-form{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;}
+  .add-form input[type=text]{flex:1;min-width:160px;}
+  #addBtn{background:var(--accent);border:none;color:#0F1318;font-family:'IBM Plex Sans Thai',sans-serif;font-weight:600;font-size:13.5px;padding:8px 16px;border-radius:6px;cursor:pointer;white-space:nowrap;}
+  .del-btn{background:none;border:none;color:var(--muted2);font-size:16px;line-height:1;cursor:pointer;padding:4px 6px;border-radius:5px;}
+  .del-btn:hover{color:var(--overdue);background:var(--overdue-bg);}
+  #loginScreen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .login-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:32px 28px;width:100%;max-width:340px;}
+  .login-box h2{margin:0 0 6px;font-size:19px;}
+  .login-box p{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.5;}
+  .login-box input{width:100%;margin-bottom:10px;padding:10px 12px;font-size:14px;}
+  .login-box button{width:100%;background:var(--accent);border:none;color:#0F1318;font-family:'IBM Plex Sans Thai',sans-serif;font-weight:600;font-size:14px;padding:10px;border-radius:6px;cursor:pointer;}
+  .login-error{color:var(--overdue);font-size:12.5px;margin:-4px 0 10px;min-height:16px;}
+  .login-hint{margin-top:14px;font-size:11.5px;color:var(--muted2);border-top:1px solid var(--line);padding-top:12px;}
+  #app{display:none;}
+  #modalOverlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;align-items:center;justify-content:center;z-index:200;padding:20px;}
+  #modalOverlay.open{display:flex;}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;width:100%;max-width:340px;}
+  .modal-box h3{margin:0 0 6px;font-size:17px;}
+  .modal-box p{margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.5;}
+  .modal-field{margin-bottom:12px;}
+  .modal-field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;}
+  .modal-field input{width:100%;padding:9px 10px;font-size:13.5px;}
+  .modal-error{color:var(--overdue);font-size:12.5px;margin:-6px 0 10px;min-height:16px;}
+  .modal-actions{display:flex;gap:8px;margin-top:4px;}
+  .modal-actions button{flex:1;font-family:'IBM Plex Sans Thai',sans-serif;font-weight:600;font-size:13.5px;padding:9px;border-radius:6px;cursor:pointer;border:none;}
+  .modal-btn-confirm{background:var(--accent);color:#0F1318;}
+  .modal-btn-cancel{background:none;border:1px solid var(--line) !important;color:var(--muted);}
+  .modal-btn-cancel:hover{color:var(--text);border-color:var(--muted) !important;}
+  @media (max-width:520px){ .row-side{width:100%;justify-content:space-between;} }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <h2>เข้าสู่ระบบ</h2>
+    <p>ระบบติดตามการต่ออายุ — เข้าสู่ระบบเพื่อใช้งาน</p>
+    <input type="text" id="loginUsername" placeholder="ชื่อผู้ใช้" autofocus>
+    <input type="password" id="loginPassword" placeholder="รหัสผ่าน">
+    <div class="login-error" id="loginError"></div>
+    <button id="loginBtn">เข้าสู่ระบบ</button>
+    <div class="login-hint">เริ่มต้นด้วยชื่อผู้ใช้ "admin" รหัสผ่าน "renew2026" — เปลี่ยนได้หลังเข้าสู่ระบบ</div>
+  </div>
+</div>
+
+<div id="modalOverlay">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <p id="modalMessage"></p>
+    <div id="modalFields"></div>
+    <div class="modal-error" id="modalError"></div>
+    <div class="modal-actions">
+      <button class="modal-btn-cancel" id="modalCancelBtn">ยกเลิก</button>
+      <button class="modal-btn-confirm" id="modalConfirmBtn">ตกลง</button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+<div class="wrap">
+  <header>
+    <div class="eyebrow">IT ASSET RENEWAL</div>
+    <h1>ระบบติดตามการต่ออายุ</h1>
+    <p class="subtitle">ข้อมูลบันทึกในฐานข้อมูลที่เซิร์ฟเวอร์ทันทีที่แก้ไข พร้อมส่งอีเมลแจ้งเตือนอัตโนมัติทุกวันเมื่อใกล้/เลยกำหนด</p>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="add-form">
+    <input type="text" id="newName" placeholder="ชื่อรายการใหม่ เช่น ต่ออายุ Adobe">
+    <input type="date" id="newDate">
+    <button id="addBtn">+ เพิ่มรายการ</button>
+  </div>
+
+  <div id="groups"></div>
+
+  <footer>
+    <span id="statusText">—</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="reset-btn" id="changePwBtn">แก้ไขบัญชีผู้ใช้</button>
+      <button class="reset-btn" id="resetBtn">คืนค่าข้อมูลเริ่มต้น</button>
+      <button class="logout-btn" id="logoutBtn">ออกจากระบบ</button>
+    </div>
+  </footer>
+</div>
+</div>
+
+<script>
+let items = [];
+let token = null;
+
+/* ---------- Modal ---------- */
+function openModal({ title, message, fields = [], confirmText = 'ตกลง', cancelText = 'ยกเลิก', showCancel = true }){
+  const overlay = document.getElementById('modalOverlay');
+  const fieldsEl = document.getElementById('modalFields');
+  const confirmBtn = document.getElementById('modalConfirmBtn');
+  const cancelBtn = document.getElementById('modalCancelBtn');
+  document.getElementById('modalTitle').textContent = title || '';
+  document.getElementById('modalMessage').textContent = message || '';
+  document.getElementById('modalError').textContent = '';
+  fieldsEl.innerHTML = '';
+  cancelBtn.style.display = showCancel ? 'block' : 'none';
+  confirmBtn.textContent = confirmText;
+  cancelBtn.textContent = cancelText;
+  fields.forEach(f => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-field';
+    wrap.innerHTML = `<label>${f.label}</label><input type="${f.type || 'text'}" id="modalField_${f.id}" value="${f.value || ''}" placeholder="${f.placeholder || ''}">`;
+    fieldsEl.appendChild(wrap);
+  });
+  overlay.classList.add('open');
+  if(fields[0]) document.getElementById(`modalField_${fields[0].id}`)?.focus();
+  return new Promise(resolve => {
+    function cleanup(result){
+      overlay.classList.remove('open');
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    }
+    function onConfirm(){
+      const values = {};
+      fields.forEach(f => { values[f.id] = document.getElementById(`modalField_${f.id}`).value; });
+      cleanup({ confirmed: true, values });
+    }
+    function onCancel(){ cleanup({ confirmed: false, values: {} }); }
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+function showAlert(message, title = ''){ return openModal({ title, message, fields: [], confirmText: 'ตกลง', showCancel: false }); }
+function showConfirm(message, title = ''){ return openModal({ title, message, fields: [], confirmText: 'ยืนยัน', cancelText: 'ยกเลิก' }).then(r => r.confirmed); }
+
+/* ---------- API helper ---------- */
+async function api(path, options = {}){
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'x-auth-token': token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if(!res.ok) throw new Error(data.error || 'เกิดข้อผิดพลาด');
+  return data;
+}
+
+/* ---------- Login ---------- */
+async function attemptLogin(){
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  try{
+    const data = await api('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+    token = data.token;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    await loadItems();
+  }catch(err){
+    document.getElementById('loginError').textContent = err.message;
+  }
+}
+document.getElementById('loginBtn').addEventListener('click', attemptLogin);
+document.getElementById('loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') attemptLogin(); });
+document.getElementById('loginUsername').addEventListener('keydown', e => { if(e.key === 'Enter') document.getElementById('loginPassword').focus(); });
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  try{ await api('/api/logout', { method: 'POST' }); }catch(e){}
+  token = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginUsername').value = '';
+  document.getElementById('loginPassword').value = '';
+});
+
+document.getElementById('changePwBtn').addEventListener('click', async () => {
+  const r = await openModal({
+    title: 'แก้ไขบัญชีผู้ใช้',
+    message: 'ใส่รหัสผ่านปัจจุบันเพื่อยืนยัน แล้วตั้งค่าใหม่ (เว้นว่าง = ไม่เปลี่ยน)',
+    fields: [
+      { id: 'current', label: 'รหัสผ่านปัจจุบัน', type: 'password' },
+      { id: 'newUser', label: 'ชื่อผู้ใช้ใหม่', type: 'text' },
+      { id: 'newPass', label: 'รหัสผ่านใหม่', type: 'password' },
+    ],
+    confirmText: 'บันทึก',
+  });
+  if(!r.confirmed) return;
+  try{
+    await api('/api/change-account', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword: r.values.current, newUsername: r.values.newUser, newPassword: r.values.newPass }),
+    });
+    await showAlert('บันทึกบัญชีใหม่เรียบร้อย มีผลถาวรทันที', 'สำเร็จ');
+  }catch(err){
+    await showAlert(err.message, 'ผิดพลาด');
+  }
+});
+
+/* ---------- Data + render ---------- */
+async function loadItems(){
+  items = await api('/api/items');
+  render();
+}
+
+function daysBetween(dueISO){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const due = new Date(dueISO + 'T00:00:00');
+  return Math.round((due - today) / 86400000);
+}
+function statusOf(item){
+  if(item.renewed) return 'renewed';
+  if(!item.dueDate) return 'unset';
+  const d = daysBetween(item.dueDate);
+  if(d < 0) return 'overdue';
+  if(d <= 30) return 'soon';
+  return 'ok';
+}
+function daysLabel(item){
+  if(item.renewed) return 'ต่ออายุแล้ว';
+  if(!item.dueDate) return 'ยังไม่ระบุวันที่';
+  const d = daysBetween(item.dueDate);
+  if(d < 0) return `เลยกำหนด ${Math.abs(d)} วัน`;
+  if(d === 0) return 'ครบกำหนดวันนี้';
+  return `เหลืออีก ${d} วัน`;
+}
+function thaiDate(iso){
+  if(!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()+543}`;
+}
+
+function render(){
+  const groups = { overdue: [], soon: [], ok: [], renewed: [], unset: [] };
+  items.forEach(it => groups[statusOf(it)].push(it));
+  ['overdue','soon','ok','unset'].forEach(k => groups[k].sort((a,b) => {
+    if(!a.dueDate) return 1; if(!b.dueDate) return -1; return a.dueDate.localeCompare(b.dueDate);
+  }));
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat overdue"><div class="num">${groups.overdue.length}</div><div class="lbl">เลยกำหนดแล้ว</div></div>
+    <div class="stat soon"><div class="num">${groups.soon.length}</div><div class="lbl">ใกล้ครบกำหนด (30 วัน)</div></div>
+    <div class="stat ok"><div class="num">${groups.ok.length}</div><div class="lbl">ยังไม่ถึงกำหนด</div></div>
+    <div class="stat renewed"><div class="num">${groups.renewed.length}</div><div class="lbl">ต่ออายุแล้ว</div></div>
+  `;
+
+  const sections = [
+    { key:'overdue', title:'เลยกำหนดแล้ว — ควรตรวจสอบและอัปเดต', color:'var(--overdue)' },
+    { key:'soon', title:'ใกล้ครบกำหนดภายใน 30 วัน', color:'var(--soon)' },
+    { key:'ok', title:'ยังไม่ถึงกำหนด', color:'var(--ok)' },
+    { key:'renewed', title:'ต่ออายุแล้ว', color:'var(--accent)' },
+    { key:'unset', title:'ยังไม่ระบุวันที่', color:'var(--unset)' },
+  ];
+
+  const groupsEl = document.getElementById('groups');
+  groupsEl.innerHTML = '';
+  sections.forEach(sec => {
+    const list = groups[sec.key];
+    if(list.length === 0) return;
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'group';
+    groupDiv.innerHTML = `<div class="group-title"><span class="dot" style="background:${sec.color}"></span>${sec.title}</div>`;
+    list.forEach(item => {
+      const row = document.createElement('div');
+      row.className = `row ${sec.key}`;
+      row.innerHTML = `
+        <div class="row-main">
+          <div class="row-name">${item.name}</div>
+          <div class="row-note">${item.note || ''}${item.dueDate ? ' · ครบกำหนด ' + thaiDate(item.dueDate) : ''}</div>
+        </div>
+        <div class="row-side">
+          <label class="renew-toggle ${item.renewed ? 'is-renewed' : ''}">
+            <input type="checkbox" data-renew="${item.id}" ${item.renewed ? 'checked' : ''}> ต่ออายุแล้ว
+          </label>
+          <span class="days-label ${sec.key}">${daysLabel(item)}</span>
+          <input type="date" value="${item.dueDate || ''}" data-id="${item.id}">
+          <button class="del-btn" data-del="${item.id}" title="ลบรายการนี้">✕</button>
+        </div>
+      `;
+      groupsEl.appendChild(row);
+    });
+  });
+
+  groupsEl.querySelectorAll('input[type=date]').forEach(inp => {
+    inp.addEventListener('change', async e => {
+      const id = e.target.getAttribute('data-id');
+      document.getElementById('statusText').textContent = 'กำลังบันทึก...';
+      try{
+        await api(`/api/items/${id}`, { method: 'PUT', body: JSON.stringify({ dueDate: e.target.value || null }) });
+        await loadItems();
+        document.getElementById('statusText').textContent = 'บันทึกแล้ว ' + new Date().toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'});
+      }catch(err){
+        document.getElementById('statusText').textContent = 'บันทึกไม่สำเร็จ: ' + err.message;
+      }
+    });
+  });
+  groupsEl.querySelectorAll('input[data-renew]').forEach(cb => {
+    cb.addEventListener('change', async e => {
+      const id = e.target.getAttribute('data-renew');
+      try{
+        await api(`/api/items/${id}`, { method: 'PUT', body: JSON.stringify({ renewed: e.target.checked }) });
+        await loadItems();
+      }catch(err){
+        await showAlert(err.message, 'ผิดพลาด');
+      }
+    });
+  });
+  groupsEl.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const id = e.target.getAttribute('data-del');
+      const it = items.find(i => i.id === id);
+      if(!it) return;
+      const ok = await showConfirm(`ลบ "${it.name}" ออกจากรายการ?`, 'ยืนยันการลบ');
+      if(ok){
+        await api(`/api/items/${id}`, { method: 'DELETE' });
+        await loadItems();
+      }
+    });
+  });
+}
+
+document.getElementById('addBtn').addEventListener('click', async () => {
+  const nameEl = document.getElementById('newName');
+  const dateEl = document.getElementById('newDate');
+  const name = nameEl.value.trim();
+  if(!name){ nameEl.focus(); return; }
+  await api('/api/items', { method: 'POST', body: JSON.stringify({ name, dueDate: dateEl.value || null }) });
+  nameEl.value = ''; dateEl.value = '';
+  await loadItems();
+});
+
+document.getElementById('resetBtn').addEventListener('click', async () => {
+  const ok = await showConfirm('คืนค่าข้อมูลกลับเป็นชุดเริ่มต้น? การแก้ไขทั้งหมดจะหายไป', 'ยืนยันการรีเซ็ต');
+  if(!ok) return;
+  await api('/api/items/reset', { method: 'POST' });
+  await loadItems();
+});
+</script>
+</body>
+</html>
