@@ -43,6 +43,23 @@ const DEFAULT_ITEMS = [
 ];
 const DEFAULT_AUTH = { username: 'admin', password: 'renew2026' };
 
+// ---------- Helper: แปลงผลลัพธ์จาก Turso ให้เป็น object ที่มีชื่อ key แน่นอน ----------
+// (กันปัญหา driver บางเวอร์ชันคืนแถวมาเป็น array แทน object ทำให้เข้าถึงด้วยชื่อคอลัมน์ไม่ได้)
+function rowsToObjects(result) {
+  const columns = result.columns || [];
+  return result.rows.map(row => {
+    if (Array.isArray(row)) {
+      const obj = {};
+      columns.forEach((col, i) => { obj[col] = row[i]; });
+      return obj;
+    }
+    if (columns.length === 0) return row; // ไม่มี column list ให้ใช้ ก็คืน row ตรงๆ
+    const obj = {};
+    columns.forEach(col => { obj[col] = row[col]; });
+    return obj;
+  });
+}
+
 async function initDb() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS items (
@@ -62,33 +79,35 @@ async function initDb() {
   `);
 
   const countRes = await db.execute('SELECT COUNT(*) AS c FROM items');
-  if (countRes.rows[0].c === 0) {
+  const count = rowsToObjects(countRes)[0].c;
+  if (count === 0) {
     for (const it of DEFAULT_ITEMS) {
-      await db.execute({
-        sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
-        args: [it.id, it.name, it.dueDate, it.note],
-      });
+      await db.execute(
+        'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+        [it.id, it.name, it.dueDate, it.note]
+      );
     }
   }
 
-  const authRes = await db.execute({ sql: 'SELECT value FROM settings WHERE key = ?', args: ['auth'] });
-  if (authRes.rows.length === 0) {
-    await db.execute({
-      sql: 'INSERT INTO settings (key, value) VALUES (?, ?)',
-      args: ['auth', JSON.stringify(DEFAULT_AUTH)],
-    });
+  const authRes = await db.execute('SELECT value FROM settings WHERE key = ?', ['auth']);
+  const authRows = rowsToObjects(authRes);
+  if (authRows.length === 0) {
+    await db.execute(
+      'INSERT INTO settings (key, value) VALUES (?, ?)',
+      ['auth', JSON.stringify(DEFAULT_AUTH)]
+    );
   }
 }
 
 async function getAuth() {
-  const res = await db.execute({ sql: 'SELECT value FROM settings WHERE key = ?', args: ['auth'] });
-  return JSON.parse(res.rows[0].value);
+  const res = await db.execute('SELECT value FROM settings WHERE key = ?', ['auth']);
+  return JSON.parse(rowsToObjects(res)[0].value);
 }
 async function setAuth(auth) {
-  await db.execute({
-    sql: 'UPDATE settings SET value = ? WHERE key = ?',
-    args: [JSON.stringify(auth), 'auth'],
-  });
+  await db.execute(
+    'UPDATE settings SET value = ? WHERE key = ?',
+    [JSON.stringify(auth), 'auth']
+  );
 }
 
 // ---------- Session แบบง่าย (เก็บใน memory ตัวเดียว — พอสำหรับผู้ดูแลคนเดียว) ----------
@@ -143,7 +162,7 @@ app.post('/api/change-account', requireAuth, async (req, res) => {
 app.get('/api/items', requireAuth, async (req, res) => {
   try {
     const result = await db.execute('SELECT * FROM items');
-    res.json(result.rows.map(r => ({ ...r, renewed: !!r.renewed })));
+    res.json(rowsToObjects(result).map(r => ({ ...r, renewed: !!r.renewed })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -154,10 +173,10 @@ app.post('/api/items', requireAuth, async (req, res) => {
     const { name, dueDate, note } = req.body;
     if (!name) return res.status(400).json({ error: 'ต้องระบุชื่อรายการ' });
     const id = 'item-' + Date.now();
-    await db.execute({
-      sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
-      args: [id, name, dueDate || null, note || 'เพิ่มเอง'],
-    });
+    await db.execute(
+      'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+      [id, name, dueDate || null, note || 'เพิ่มเอง']
+    );
     res.json({ id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -168,10 +187,10 @@ app.put('/api/items/:id', requireAuth, async (req, res) => {
   try {
     const { dueDate, renewed } = req.body;
     if (dueDate !== undefined) {
-      await db.execute({ sql: 'UPDATE items SET dueDate = ? WHERE id = ?', args: [dueDate || null, req.params.id] });
+      await db.execute('UPDATE items SET dueDate = ? WHERE id = ?', [dueDate || null, req.params.id]);
     }
     if (renewed !== undefined) {
-      await db.execute({ sql: 'UPDATE items SET renewed = ? WHERE id = ?', args: [renewed ? 1 : 0, req.params.id] });
+      await db.execute('UPDATE items SET renewed = ? WHERE id = ?', [renewed ? 1 : 0, req.params.id]);
     }
     res.json({ ok: true });
   } catch (err) {
@@ -181,7 +200,7 @@ app.put('/api/items/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/items/:id', requireAuth, async (req, res) => {
   try {
-    await db.execute({ sql: 'DELETE FROM items WHERE id = ?', args: [req.params.id] });
+    await db.execute('DELETE FROM items WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -192,13 +211,13 @@ app.post('/api/items/reset', requireAuth, async (req, res) => {
   try {
     await db.execute('DELETE FROM items');
     for (const it of DEFAULT_ITEMS) {
-      await db.execute({
-        sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
-        args: [it.id, it.name, it.dueDate, it.note],
-      });
+      await db.execute(
+        'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+        [it.id, it.name, it.dueDate, it.note]
+      );
     }
     const result = await db.execute('SELECT * FROM items');
-    res.json(result.rows.map(r => ({ ...r, renewed: !!r.renewed })));
+    res.json(rowsToObjects(result).map(r => ({ ...r, renewed: !!r.renewed })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -219,7 +238,7 @@ app.get('/api/cron/check-renewals', async (req, res) => {
     const overdue = [];
     const dueSoon = [];
 
-    result.rows.forEach(item => {
+    rowsToObjects(result).forEach(item => {
       if (!item.dueDate) return;
       if (item.lastNotifiedDate === todayStr) return; // กันส่งซ้ำวันเดียวกัน
 
@@ -237,7 +256,7 @@ app.get('/api/cron/check-renewals', async (req, res) => {
 
     await sendReminderEmail(overdue, dueSoon);
     for (const item of flagged) {
-      await db.execute({ sql: 'UPDATE items SET lastNotifiedDate = ? WHERE id = ?', args: [todayStr, item.id] });
+      await db.execute('UPDATE items SET lastNotifiedDate = ? WHERE id = ?', [todayStr, item.id]);
     }
     res.json({ sent: true, count: flagged.length });
   } catch (err) {
