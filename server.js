@@ -1,18 +1,18 @@
 // server.js
-// ระบบติดตามการต่ออายุ — Node.js + Express + JSON file storage + Nodemailer
+// ระบบติดตามการต่ออายุ — Node.js + Express + Turso (cloud SQLite) + Nodemailer
 // -----------------------------------------------------------------------
-// รัน: npm install แล้ว npm start (ดูวิธี deploy ขึ้น Render ในข้อความแชท)
+// รัน: npm install แล้ว npm start
 //
-// หมายเหตุ: ใช้ไฟล์ JSON (data.json) เก็บข้อมูลแทน SQLite เพราะ SQLite แบบ native
-// (better-sqlite3) ต้อง compile โค้ด C++ ตอนติดตั้ง ซึ่งพังบ่อยบน hosting ฟรีบางเจ้า
-// ไฟล์ JSON เก็บถาวรได้เหมือนกัน ไม่ต้อง compile อะไรเลย ติดตั้งง่ายกว่ามาก
+// หมายเหตุสำคัญ: ใช้ Turso (ฐานข้อมูลบนคลาวด์) แทนไฟล์ในเครื่อง เพราะ Render free tier
+// มี "ephemeral filesystem" — ไฟล์ที่เขียนไว้ในเครื่องจะหายทุกครั้งที่ restart/หลับ-ตื่น
+// Turso เก็บข้อมูลไว้ภายนอก จึงไม่หายไม่ว่าเซิร์ฟเวอร์จะ restart กี่ครั้งก็ตาม
 
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { createClient } = require('@tursodatabase/serverless/compat');
 
 const app = express();
 app.use(express.json());
@@ -20,38 +20,76 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 const CRON_SECRET = process.env.CRON_SECRET || 'change-this-secret';
-const DB_FILE = path.join(__dirname, 'data.json');
+
+// ---------- Turso client ----------
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
 const DEFAULT_ITEMS = [
-  { id: 'antivirus', name: 'ต่ออายุ Anti Virus', dueDate: null, note: '58 license — ต่ออายุทุกปี (พ.ศ. 2569), พบยอดในแผนเดือน 3 และ 7', renewed: false, lastNotifiedDate: null },
-  { id: 'ma-ups', name: 'ต่ออายุ MA UPS', dueDate: '2027-01-17', note: 'จากเอกสารเดิม: 17/1/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'forticloud', name: 'ต่ออายุ FortiCloud', dueDate: '2027-04-17', note: 'จากเอกสารเดิม: 17/4/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'ma-fortigate', name: 'ต่ออายุ MA Fortigate', dueDate: '2027-04-17', note: 'จากเอกสารเดิม: 17/4/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'email', name: 'ต่ออายุ E-Mail', dueDate: '2027-01-31', note: 'จากเอกสารเดิม: 31/1/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'hosting', name: 'ต่ออายุ Hosting', dueDate: '2026-12-01', note: 'จากเอกสารเดิม: 1/12/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'ssl-trffeedmill', name: 'ต่ออายุ SSL trffeedmill', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: 1/7/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'ssl-trffeed', name: 'ต่ออายุ SSL trffeed', dueDate: '2028-01-26', note: 'จากเอกสารเดิม: 26/1/2571', renewed: false, lastNotifiedDate: null },
-  { id: 'domain-trffeedmill', name: 'ต่ออายุ Domain trffeedmill', dueDate: '2031-12-31', note: 'จากเอกสารเดิม: หมดปี พ.ศ. 2574 (ไม่ระบุวันแน่นอน)', renewed: false, lastNotifiedDate: null },
-  { id: 'domain-trffeed', name: 'ต่ออายุ Domain trffeed', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: 1/7/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'line-api', name: 'ต่ออายุ Line API', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: หมด 1/7/2569', renewed: false, lastNotifiedDate: null },
-  { id: 'zoom', name: 'ต่ออายุ Zoom', dueDate: '2027-07-14', note: 'จากเอกสารเดิม: 14/7/2569', renewed: false, lastNotifiedDate: null },
+  { id: 'antivirus', name: 'ต่ออายุ Anti Virus', dueDate: null, note: '58 license — ต่ออายุทุกปี (พ.ศ. 2569), พบยอดในแผนเดือน 3 และ 7' },
+  { id: 'ma-ups', name: 'ต่ออายุ MA UPS', dueDate: '2027-01-17', note: 'จากเอกสารเดิม: 17/1/2569' },
+  { id: 'forticloud', name: 'ต่ออายุ FortiCloud', dueDate: '2027-04-17', note: 'จากเอกสารเดิม: 17/4/2569' },
+  { id: 'ma-fortigate', name: 'ต่ออายุ MA Fortigate', dueDate: '2027-04-17', note: 'จากเอกสารเดิม: 17/4/2569' },
+  { id: 'email', name: 'ต่ออายุ E-Mail', dueDate: '2027-01-31', note: 'จากเอกสารเดิม: 31/1/2569' },
+  { id: 'hosting', name: 'ต่ออายุ Hosting', dueDate: '2026-12-01', note: 'จากเอกสารเดิม: 1/12/2569' },
+  { id: 'ssl-trffeedmill', name: 'ต่ออายุ SSL trffeedmill', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: 1/7/2569' },
+  { id: 'ssl-trffeed', name: 'ต่ออายุ SSL trffeed', dueDate: '2028-01-26', note: 'จากเอกสารเดิม: 26/1/2571' },
+  { id: 'domain-trffeedmill', name: 'ต่ออายุ Domain trffeedmill', dueDate: '2031-12-31', note: 'จากเอกสารเดิม: หมดปี พ.ศ. 2574 (ไม่ระบุวันแน่นอน)' },
+  { id: 'domain-trffeed', name: 'ต่ออายุ Domain trffeed', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: 1/7/2569' },
+  { id: 'line-api', name: 'ต่ออายุ Line API', dueDate: '2027-07-01', note: 'จากเอกสารเดิม: หมด 1/7/2569' },
+  { id: 'zoom', name: 'ต่ออายุ Zoom', dueDate: '2027-07-14', note: 'จากเอกสารเดิม: 14/7/2569' },
 ];
 const DEFAULT_AUTH = { username: 'admin', password: 'renew2026' };
 
-// ---------- ฐานข้อมูลแบบไฟล์ JSON (ไฟล์เดียว: data.json) ----------
-function loadStore() {
-  if (!fs.existsSync(DB_FILE)) {
-    const initial = { items: DEFAULT_ITEMS, auth: DEFAULT_AUTH };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2));
-    return initial;
+async function initDb() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS items (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      dueDate TEXT,
+      note TEXT,
+      renewed INTEGER NOT NULL DEFAULT 0,
+      lastNotifiedDate TEXT
+    )
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
+
+  const countRes = await db.execute('SELECT COUNT(*) AS c FROM items');
+  if (countRes.rows[0].c === 0) {
+    for (const it of DEFAULT_ITEMS) {
+      await db.execute({
+        sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+        args: [it.id, it.name, it.dueDate, it.note],
+      });
+    }
   }
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-}
-function saveStore(store) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(store, null, 2));
+
+  const authRes = await db.execute({ sql: 'SELECT value FROM settings WHERE key = ?', args: ['auth'] });
+  if (authRes.rows.length === 0) {
+    await db.execute({
+      sql: 'INSERT INTO settings (key, value) VALUES (?, ?)',
+      args: ['auth', JSON.stringify(DEFAULT_AUTH)],
+    });
+  }
 }
 
-let store = loadStore();
+async function getAuth() {
+  const res = await db.execute({ sql: 'SELECT value FROM settings WHERE key = ?', args: ['auth'] });
+  return JSON.parse(res.rows[0].value);
+}
+async function setAuth(auth) {
+  await db.execute({
+    sql: 'UPDATE settings SET value = ? WHERE key = ?',
+    args: [JSON.stringify(auth), 'auth'],
+  });
+}
 
 // ---------- Session แบบง่าย (เก็บใน memory ตัวเดียว — พอสำหรับผู้ดูแลคนเดียว) ----------
 let activeToken = null;
@@ -65,13 +103,18 @@ function requireAuth(req, res, next) {
 }
 
 // ---------- Auth routes ----------
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === store.auth.username && password === store.auth.password) {
-    activeToken = crypto.randomBytes(16).toString('hex');
-    return res.json({ token: activeToken });
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const auth = await getAuth();
+    if (username === auth.username && password === auth.password) {
+      activeToken = crypto.randomBytes(16).toString('hex');
+      return res.json({ token: activeToken });
+    }
+    res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.status(401).json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 });
 
 app.post('/api/logout', requireAuth, (req, res) => {
@@ -79,61 +122,86 @@ app.post('/api/logout', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/change-account', requireAuth, (req, res) => {
-  const { currentPassword, newUsername, newPassword } = req.body;
-  if (currentPassword !== store.auth.password) {
-    return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
+app.post('/api/change-account', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newUsername, newPassword } = req.body;
+    const auth = await getAuth();
+    if (currentPassword !== auth.password) {
+      return res.status(400).json({ error: 'รหัสผ่านปัจจุบันไม่ถูกต้อง' });
+    }
+    await setAuth({
+      username: (newUsername && newUsername.trim()) || auth.username,
+      password: newPassword || auth.password,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  store.auth = {
-    username: (newUsername && newUsername.trim()) || store.auth.username,
-    password: newPassword || store.auth.password,
-  };
-  saveStore(store);
-  res.json({ ok: true });
 });
 
 // ---------- Items routes ----------
-app.get('/api/items', requireAuth, (req, res) => {
-  res.json(store.items);
+app.get('/api/items', requireAuth, async (req, res) => {
+  try {
+    const result = await db.execute('SELECT * FROM items');
+    res.json(result.rows.map(r => ({ ...r, renewed: !!r.renewed })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/items', requireAuth, (req, res) => {
-  const { name, dueDate, note } = req.body;
-  if (!name) return res.status(400).json({ error: 'ต้องระบุชื่อรายการ' });
-  const item = {
-    id: 'item-' + Date.now(),
-    name,
-    dueDate: dueDate || null,
-    note: note || 'เพิ่มเอง',
-    renewed: false,
-    lastNotifiedDate: null,
-  };
-  store.items.push(item);
-  saveStore(store);
-  res.json({ id: item.id });
+app.post('/api/items', requireAuth, async (req, res) => {
+  try {
+    const { name, dueDate, note } = req.body;
+    if (!name) return res.status(400).json({ error: 'ต้องระบุชื่อรายการ' });
+    const id = 'item-' + Date.now();
+    await db.execute({
+      sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+      args: [id, name, dueDate || null, note || 'เพิ่มเอง'],
+    });
+    res.json({ id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.put('/api/items/:id', requireAuth, (req, res) => {
-  const { dueDate, renewed } = req.body;
-  const item = store.items.find(i => i.id === req.params.id);
-  if (!item) return res.status(404).json({ error: 'ไม่พบรายการ' });
-
-  if (dueDate !== undefined) item.dueDate = dueDate || null;
-  if (renewed !== undefined) item.renewed = !!renewed;
-  saveStore(store);
-  res.json({ ok: true });
+app.put('/api/items/:id', requireAuth, async (req, res) => {
+  try {
+    const { dueDate, renewed } = req.body;
+    if (dueDate !== undefined) {
+      await db.execute({ sql: 'UPDATE items SET dueDate = ? WHERE id = ?', args: [dueDate || null, req.params.id] });
+    }
+    if (renewed !== undefined) {
+      await db.execute({ sql: 'UPDATE items SET renewed = ? WHERE id = ?', args: [renewed ? 1 : 0, req.params.id] });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.delete('/api/items/:id', requireAuth, (req, res) => {
-  store.items = store.items.filter(i => i.id !== req.params.id);
-  saveStore(store);
-  res.json({ ok: true });
+app.delete('/api/items/:id', requireAuth, async (req, res) => {
+  try {
+    await db.execute({ sql: 'DELETE FROM items WHERE id = ?', args: [req.params.id] });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/items/reset', requireAuth, (req, res) => {
-  store.items = DEFAULT_ITEMS.map(it => ({ ...it }));
-  saveStore(store);
-  res.json(store.items);
+app.post('/api/items/reset', requireAuth, async (req, res) => {
+  try {
+    await db.execute('DELETE FROM items');
+    for (const it of DEFAULT_ITEMS) {
+      await db.execute({
+        sql: 'INSERT INTO items (id, name, dueDate, note, renewed) VALUES (?, ?, ?, ?, 0)',
+        args: [it.id, it.name, it.dueDate, it.note],
+      });
+    }
+    const result = await db.execute('SELECT * FROM items');
+    res.json(result.rows.map(r => ({ ...r, renewed: !!r.renewed })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- Cron endpoint: เรียกจาก cron-job.org ทุกวัน เพื่อเช็ค + ส่งอีเมล ----------
@@ -142,36 +210,35 @@ app.get('/api/cron/check-renewals', async (req, res) => {
     return res.status(403).json({ error: 'invalid secret' });
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
-
-  const overdue = [];
-  const dueSoon = [];
-
-  store.items.forEach(item => {
-    if (item.renewed || !item.dueDate) return;
-    if (item.lastNotifiedDate === todayStr) return; // กันส่งซ้ำวันเดียวกัน
-
-    const due = new Date(item.dueDate + 'T00:00:00');
-    const daysLeft = Math.round((due - today) / 86400000);
-
-    if (daysLeft < 0) overdue.push({ ...item, daysLeft });
-    else if (daysLeft <= 7) dueSoon.push({ ...item, daysLeft });
-  });
-
-  const flagged = [...overdue, ...dueSoon];
-  if (flagged.length === 0) {
-    return res.json({ sent: false, message: 'ไม่มีรายการที่ต้องแจ้งเตือนวันนี้' });
-  }
-
   try {
-    await sendReminderEmail(overdue, dueSoon);
-    flagged.forEach(f => {
-      const item = store.items.find(i => i.id === f.id);
-      if (item) item.lastNotifiedDate = todayStr;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().slice(0, 10);
+
+    const result = await db.execute('SELECT * FROM items WHERE renewed = 0');
+    const overdue = [];
+    const dueSoon = [];
+
+    result.rows.forEach(item => {
+      if (!item.dueDate) return;
+      if (item.lastNotifiedDate === todayStr) return; // กันส่งซ้ำวันเดียวกัน
+
+      const due = new Date(item.dueDate + 'T00:00:00');
+      const daysLeft = Math.round((due - today) / 86400000);
+
+      if (daysLeft < 0) overdue.push({ ...item, daysLeft });
+      else if (daysLeft <= 7) dueSoon.push({ ...item, daysLeft });
     });
-    saveStore(store);
+
+    const flagged = [...overdue, ...dueSoon];
+    if (flagged.length === 0) {
+      return res.json({ sent: false, message: 'ไม่มีรายการที่ต้องแจ้งเตือนวันนี้' });
+    }
+
+    await sendReminderEmail(overdue, dueSoon);
+    for (const item of flagged) {
+      await db.execute({ sql: 'UPDATE items SET lastNotifiedDate = ? WHERE id = ?', args: [todayStr, item.id] });
+    }
     res.json({ sent: true, count: flagged.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -205,7 +272,13 @@ async function sendReminderEmail(overdue, dueSoon) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Renewal tracker running on port ${PORT}`);
-});
-
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Renewal tracker running on port ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+  });
