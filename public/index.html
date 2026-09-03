@@ -97,7 +97,6 @@
     <input type="password" id="loginPassword" placeholder="รหัสผ่าน">
     <div class="login-error" id="loginError"></div>
     <button id="loginBtn">เข้าสู่ระบบ</button>
-    <div class="login-hint">เริ่มต้นด้วยชื่อผู้ใช้ "admin" รหัสผ่าน "renew2026" — เปลี่ยนได้หลังเข้าสู่ระบบ</div>
   </div>
 </div>
 
@@ -233,7 +232,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 document.getElementById('changePwBtn').addEventListener('click', async () => {
   const r = await openModal({
     title: 'แก้ไขบัญชีผู้ใช้',
-    message: 'ใส่รหัสผ่านปัจจุบันเพื่อยืนยัน แล้วตั้งค่าใหม่ (เว้นว่าง = ไม่เปลี่ยน)',
+    message: 'ใส่รหัสผ่านปัจจุบันเพื่อยืนยัน',
     fields: [
       { id: 'current', label: 'รหัสผ่านปัจจุบัน', type: 'password' },
       { id: 'newUser', label: 'ชื่อผู้ใช้ใหม่', type: 'text' },
