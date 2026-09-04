@@ -1,17 +1,19 @@
 // server.js
-// ระบบติดตามการต่ออายุ — Node.js + Express + Turso (cloud SQLite) + Nodemailer
+// ระบบติดตามการต่ออายุ — Node.js + Express + Turso (cloud SQLite) + Resend (ส่งอีเมล)
 // -----------------------------------------------------------------------
 // รัน: npm install แล้ว npm start
 //
-// หมายเหตุสำคัญ: ใช้ Turso (ฐานข้อมูลบนคลาวด์) แทนไฟล์ในเครื่อง เพราะ Render free tier
+// หมายเหตุสำคัญ #1: ใช้ Turso (ฐานข้อมูลบนคลาวด์) แทนไฟล์ในเครื่อง เพราะ Render free tier
 // มี "ephemeral filesystem" — ไฟล์ที่เขียนไว้ในเครื่องจะหายทุกครั้งที่ restart/หลับ-ตื่น
-// Turso เก็บข้อมูลไว้ภายนอก จึงไม่หายไม่ว่าเซิร์ฟเวอร์จะ restart กี่ครั้งก็ตาม
+//
+// หมายเหตุสำคัญ #2: ใช้ Resend (ส่งอีเมลผ่าน HTTPS API) แทน Nodemailer+SMTP เพราะ Render
+// free tier บล็อกการเชื่อมต่อ SMTP (พอร์ต 25/465/587) ทั้งหมดตั้งแต่ปลายปี 2568
+// ทำให้ nodemailer ค้างไม่มีวันเชื่อมต่อสำเร็จ Resend ส่งผ่าน HTTPS (พอร์ต 443) จึงไม่โดนบล็อก
 
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const { createClient } = require('@tursodatabase/serverless/compat');
 
 const app = express();
@@ -265,14 +267,6 @@ app.get('/api/cron/check-renewals', async (req, res) => {
 });
 
 async function sendReminderEmail(overdue, dueSoon) {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
-
   const lines = [];
   if (overdue.length) {
     lines.push('=== เลยกำหนดแล้ว ===');
@@ -283,12 +277,25 @@ async function sendReminderEmail(overdue, dueSoon) {
     dueSoon.forEach(it => lines.push(`- ${it.name}: เหลืออีก ${it.daysLeft} วัน (ครบกำหนด ${it.dueDate})`));
   }
 
-  await transporter.sendMail({
-    from: process.env.GMAIL_USER,
-    to: process.env.NOTIFY_EMAIL || process.env.GMAIL_USER,
-    subject: 'แจ้งเตือน: รายการที่ต้องต่ออายุ',
-    text: lines.join('\n'),
+  // ส่งผ่าน Resend HTTPS API (พอร์ต 443) แทน SMTP เพื่อไม่ให้โดน Render บล็อก
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: process.env.FROM_EMAIL || 'onboarding@resend.dev',
+      to: process.env.NOTIFY_EMAIL,
+      subject: 'แจ้งเตือน: รายการที่ต้องต่ออายุ',
+      text: lines.join('\n'),
+    }),
   });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Resend API error (${response.status}): ${errBody}`);
+  }
 }
 
 initDb()
