@@ -1,0 +1,33 @@
+# เช็ควันครบกำหนดและส่งอีเมลแจ้งเตือนทุกเช้า (แทน cron-job.org + เซิร์ฟเวอร์ Render ที่หลับ)
+name: Daily renewal check
+
+on:
+  schedule:
+    # เวลาของ GitHub เป็น UTC: 01:15 UTC = 08:15 น. เวลาไทย
+    - cron: '15 1 * * *'
+    # รอบสำรอง 09:15 น. เวลาไทย (ไม่ส่งซ้ำ เพราะระบบจำว่าวันนี้แจ้งรายการไหนไปแล้ว)
+    - cron: '15 2 * * *'
+  workflow_dispatch: # ให้กดรันเองได้จากแท็บ Actions เพื่อทดสอบ
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check renewals and send email
+        run: node scripts/check-renewals.js
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
