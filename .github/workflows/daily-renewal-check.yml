@@ -1,12 +1,18 @@
-# เช็ควันครบกำหนดและส่งอีเมลแจ้งเตือนทุกเช้า (แทน cron-job.org + เซิร์ฟเวอร์ Render ที่หลับ)
+# เช็ควันครบกำหนด แล้วให้ Resend ปล่อยอีเมลแจ้งเตือนตอน 08:15 น. (เวลาไทย) ตรงเวลา
+# หลักการ: GitHub รันงานตั้งเวลาได้ช้ากว่าที่ตั้งมาก (เคยช้าหลายชั่วโมง) จึงให้รันตั้งแต่หลังเที่ยงคืน
+# สคริปต์จะบอก Resend ว่า "ปล่อยเมลตอน 08:15" ความช้าของ GitHub จึงไม่กระทบเวลาที่เมลถึง
+# (ใช้นาทีที่ไม่ใช่ :00 เพราะต้นชั่วโมงเป็นช่วงที่ GitHub คิวหนาแน่นและมักเริ่มงานช้า)
 name: Daily renewal check
 
 on:
   schedule:
-    # เวลาของ GitHub เป็น UTC: 01:15 UTC = 08:15 น. เวลาไทย
-    - cron: '15 1 * * *'
-    # รอบสำรอง 09:15 น. เวลาไทย (ไม่ส่งซ้ำ เพราะระบบจำว่าวันนี้แจ้งรายการไหนไปแล้ว)
-    - cron: '15 2 * * *'
+    # เวลาของ GitHub เป็น UTC (เวลาไทย = UTC + 7)
+    - cron: '23 17 * * *'   # 00:23 น. เวลาไทย (รอบหลัก)
+    - cron: '23 18 * * *'   # 01:23 น. (สำรอง)
+    - cron: '23 19 * * *'   # 02:23 น. (สำรอง)
+    - cron: '23 20 * * *'   # 03:23 น. (สำรอง)
+    - cron: '23 21 * * *'   # 04:23 น. (สำรองสุดท้าย)
+    # รอบที่รันทีหลังจะไม่ส่งซ้ำ เพราะระบบจำว่าวันนี้แจ้งรายการไหนไปแล้ว
   workflow_dispatch: # ให้กดรันเองได้จากแท็บ Actions เพื่อทดสอบ
 
 jobs:
@@ -18,12 +24,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Check renewals and send email
+      - name: Check renewals and schedule email
         run: node scripts/check-renewals.js
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
