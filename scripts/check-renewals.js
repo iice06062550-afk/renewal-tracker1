@@ -5,6 +5,8 @@
 const { createClient } = require('@tursodatabase/serverless/compat');
 
 const LEAD_DAYS = 7; // แจ้งเมื่อเหลือ 7 วันหรือน้อยกว่า (และแจ้งต่อถ้าเลยกำหนดแล้ว)
+const SEND_TIME = '08:15'; // เวลาที่ต้องการให้เมลถึง (เวลาไทย) — ให้ Resend เป็นคนปล่อยเมลตามเวลานี้
+const SAFETY_MS = 60 * 1000; // ถ้าเหลือเวลาน้อยกว่า 1 นาทีก่อนถึงเวลา ให้ส่งทันที
 
 // วันที่ปัจจุบันตามเวลาไทย รูปแบบ YYYY-MM-DD
 function bangkokToday() {
@@ -28,6 +30,14 @@ function classify(items, today) {
     else if (daysLeft <= LEAD_DAYS) dueSoon.push({ ...item, daysLeft });
   }
   return { overdue, dueSoon };
+}
+
+// คืนเวลา (ISO) ที่จะให้ Resend ปล่อยเมล หรือ null ถ้าเลยเวลาแล้ว (ให้ส่งทันที)
+// ตัวสคริปต์จึงรันเมื่อไหร่ก่อน 08:15 ก็ได้ ความตรงเวลาของเมลไม่ขึ้นกับความช้าของ GitHub
+function computeScheduledAt(now, today) {
+  const target = new Date(`${today}T${SEND_TIME}:00+07:00`);
+  if (target.getTime() - now.getTime() > SAFETY_MS) return target.toISOString();
+  return null;
 }
 
 function buildEmailText(overdue, dueSoon) {
@@ -60,7 +70,7 @@ function rowsToObjects(result) {
   });
 }
 
-async function sendEmail(text) {
+async function sendEmail(text, scheduledAt) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -72,6 +82,7 @@ async function sendEmail(text) {
       to: process.env.NOTIFY_EMAIL,
       subject: 'แจ้งเตือน: รายการที่ต้องต่ออายุ',
       text,
+      ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
     }),
   });
   if (!response.ok) {
@@ -104,12 +115,17 @@ async function main() {
     return;
   }
 
-  await sendEmail(buildEmailText(overdue, dueSoon));
-  // บันทึกว่าแจ้งแล้ววันนี้ (กันส่งซ้ำถ้ารันรอบสำรอง) — ทำหลังส่งสำเร็จเท่านั้น
+  const scheduledAt = computeScheduledAt(new Date(), today);
+  await sendEmail(buildEmailText(overdue, dueSoon), scheduledAt);
+  // บันทึกว่าแจ้งแล้ววันนี้ (กันส่งซ้ำถ้ารันรอบสำรอง) — ทำหลัง Resend รับคำสั่งสำเร็จเท่านั้น
   for (const item of flagged) {
     await db.execute('UPDATE items SET lastNotifiedDate = ? WHERE id = ?', [today, item.id]);
   }
-  console.log(`ส่งอีเมลแจ้งเตือนแล้ว ${flagged.length} รายการ`);
+  if (scheduledAt) {
+    console.log(`ตั้งเวลาส่งอีเมล ${flagged.length} รายการกับ Resend แล้ว จะถึงตอน ${SEND_TIME} น. (${scheduledAt})`);
+  } else {
+    console.log(`เลยเวลา ${SEND_TIME} น. แล้ว ส่งอีเมล ${flagged.length} รายการทันที`);
+  }
 }
 
 if (require.main === module) {
@@ -119,4 +135,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classify, daysUntil, bangkokToday, buildEmailText, rowsToObjects };
+module.exports = { classify, daysUntil, bangkokToday, buildEmailText, rowsToObjects, computeScheduledAt };
